@@ -1,0 +1,9 @@
+sample:
+  description: USB-UART bridge with HCI UART sample
+  name: USB-UART bridge HCI
+tests:
+  test_build:
+    build_only: true
+    build_on_all: true
+    platform_whitelist: nrf52840_pca20035
+    tags: ci_build
