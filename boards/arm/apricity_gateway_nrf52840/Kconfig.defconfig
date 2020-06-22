@@ -1,0 +1,29 @@
+# nRF52840 THINGY91 board configuration
+#
+# Copyright (c) 2019 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+
+if BOARD_THINGY91_NRF52840
+
+config BOARD
+	default "thingy91_nrf52840"
+
+config BT_CTLR
+	default BT
+
+if USB
+
+config IEEE802154_NRF5
+	default y
+	depends on IEEE802154
+
+config USB_NRFX
+	def_bool y
+
+config USB_DEVICE_STACK
+	def_bool y
+
+endif # USB
+
+endif # BOARD_THINGY91_NRF52840

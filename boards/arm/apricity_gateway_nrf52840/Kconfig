@@ -1,0 +1,79 @@
+# Thingy:91 nRF52840 board configuration
+#
+# Copyright (c) 2019 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+
+if BOARD_THINGY91_NRF52840
+
+config BOARD_ENABLE_DCDC
+	bool "Enable DCDC mode"
+	select SOC_DCDC_NRF52X
+	default y
+
+config BOARD_PCA20035_NRF52840_RESET
+	bool "Enable GPIO reset line"
+	help
+	 Let the nRF52840 be reset from the nRF9160 via a GPIO line.
+	 The GPIO line may only be one of the 8 interface pins.
+	 The line is active high.
+
+if BOARD_PCA20035_NRF52840_RESET
+
+choice
+	prompt "Pin used for reset"
+
+comment "nRF52840 pins"
+
+config BOARD_PCA20035_NRF52840_RESET_P0_06
+	bool "P0.06"
+	help
+	 Pin P0.06 on nRF52840,
+	 connected to P0.06 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_05
+	bool "P0.05"
+	help
+	 Pin P0.05 on nRF52840,
+	 connected to P0.06 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_26
+	bool "P0.26"
+	help
+	 Pin P0.26 on nRF52840,
+	 connected to P0.26 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_27
+	bool "P0.27"
+	help
+	 Pin P0.27 on nRF52840,
+	 connected to P0.27 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_28
+	bool "P0.28"
+	help
+	 Pin P0.28 on nRF52840,
+	 connected to P0.28 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_30
+	bool "P0.30"
+	help
+	 Pin P0.30 on nRF52840,
+	 connected to P0.30 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P0_03
+	bool "P0.03"
+	help
+	 Pin P0.03 on nRF52840,
+	 connected to P0.03 on the nRF9160.
+
+config BOARD_PCA20035_NRF52840_RESET_P1_11
+	bool "P1.11"
+	help
+	 Pin P1.11 on nRF52840,
+	 connected to P1.11 on the nRF9160.
+
+endchoice
+endif # BOARD_PCA10090_NRF52840_RESET
+
+endif # BOARD_THINGY91_NRF52840
