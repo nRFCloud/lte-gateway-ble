@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Nordic Semiconductor ASA
+ * Copyright (c) 2020 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
@@ -8,8 +8,8 @@
 #include <nordic/nrf52840_qiaa.dtsi>
 
 / {
-	model = "Nordic Thingy91 NRF52840";
-	compatible = "nordic,thingy91-nrf52840";
+	model = "Nordic Apricity_gateway NRF52840";
+	compatible = "nordic,apricity_gateway-nrf52840";
 
 	chosen {
 		zephyr,console = &uart0;
@@ -37,31 +37,24 @@
 	status = "okay";
 };
 
-//&uart0 {
-//	compatible = "nordic,nrf-uarte";
-//	current-speed = <115200>;
-//	status = "okay";
-//	tx-pin = <15>;
-//	rx-pin = <11>;
-//	rts-pin = <21>;
-//	cts-pin = <20>;
-//};
-
 &uart0 {
 	compatible = "nordic,nrf-uarte";
 	current-speed = <115200>;
 	status = "okay";
-	tx-pin = <28>;
-	rx-pin = <30>;
+	tx-pin = < 13 >;
+	rx-pin = < 11 >;
+	rts-pin = < 14 >;
+	cts-pin = < 15 >;
 };
 
 &uart1 {
+	compatible = "nordic,nrf-uarte";
 	current-speed = <1000000>;
 	status = "okay";
-	tx-pin = <25>;
-	rx-pin = <32>;
-	rts-pin = <22>;
-	cts-pin = <19>;
+	tx-pin = < 20 >;
+	rx-pin = < 22 >;
+	rts-pin = < 24 >;
+	cts-pin = < 32 >;
 };
 
 &usbd {

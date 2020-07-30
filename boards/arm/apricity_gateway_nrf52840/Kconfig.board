@@ -1,11 +1,11 @@
-# nRF52840 THINGY91 board configuration
+# nRF52840 APRICITY_GATEWAY board configuration
 #
-# Copyright (c) 2019 Nordic Semiconductor ASA
+# Copyright (c) 2020 Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
 
-config BOARD_THINGY91_NRF52840
-	bool "nRF52840 THINGY91"
+config BOARD_APRICITY_GATEWAY_NRF52840
+	bool "nRF52840 APRICITY_GATEWAY"
 	depends on SOC_NRF52840_QIAA
 # The GPIO driver is required by this board's initialization code
 # (board.c), so it is forced here to be enabled always, not only

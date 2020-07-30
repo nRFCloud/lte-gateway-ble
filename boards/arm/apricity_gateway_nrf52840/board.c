@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Nordic Semiconductor ASA.
+ * Copyright (c) 2020 Nordic Semiconductor ASA.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,7 +13,7 @@ LOG_MODULE_REGISTER(board_control, CONFIG_LOG_OVERRIDE_LEVEL);
 
 /* Spare Pins
  *
- * | nRF52840 |			 
+ * | nRF52840 |
  * | P0.06   |
  * | P0.05   |
  * | P0.26   |
@@ -29,6 +29,7 @@ __packed struct pin_config {
 	u8_t val;
 };
 
+bool ignore_reset = true;
 static void chip_reset(struct device *gpio,
 		       struct gpio_callback *cb, u32_t pins)
 {
@@ -37,7 +38,9 @@ static void chip_reset(struct device *gpio,
 	printk("GPIO reset line asserted, device reset.\n");
 	printk("Bye @ cycle32 %u\n", stamp);
 
-	NVIC_SystemReset();
+	if (!ignore_reset) {
+		NVIC_SystemReset();
+	}
 }
 
 static void reset_pin_wait_low(struct device *port, u32_t pin)
@@ -50,17 +53,12 @@ static void reset_pin_wait_low(struct device *port, u32_t pin)
 	} while (val > 0);
 }
 
-static int reset_pin_configure(struct device *p0, struct device *p1)
+static int reset_pin_configure(struct device *port, u32_t pin)
 {
 	int err;
-	u32_t pin = 0;
-	struct device *port = NULL;
 
 	static struct gpio_callback gpio_ctx;
 
-        port = p1;
-        pin = 2;
-	
 	__ASSERT_NO_MSG(port != NULL);
 
 	err = gpio_pin_configure(port, pin, GPIO_INPUT | GPIO_PULL_DOWN);
@@ -83,8 +81,7 @@ static int reset_pin_configure(struct device *p0, struct device *p1)
 	/* Wait until the pin is pulled low before continuing.
 	 * This lets the other side ensure that they are ready.
 	 */
-	LOG_INF("GPIO reset line enabled on pin %s.%02u, holding..",
-		port == p0 ? "P0" : "P1", pin);
+	LOG_INF("GPIO reset line enabled");
 
 	reset_pin_wait_low(port, pin);
 
@@ -93,35 +90,37 @@ static int reset_pin_configure(struct device *p0, struct device *p1)
 
 static int init(struct device *dev)
 {
-	int rc;
-	struct device *p0;
-	struct device *p1;
-
-	p0 = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
-	if (!p0) {
-		LOG_ERR("GPIO device " DT_LABEL(DT_NODELABEL(gpio0))
-			" not found!");
-		return -EIO;
-	}
-
-	p1 = device_get_binding(DT_LABEL(DT_NODELABEL(gpio1)));
-	if (!p1) {
-		LOG_ERR("GPIO device " DT_LABEL(DT_NODELABEL(gpio1))
-			" not found!");
-		return -EIO;
-	}
-
 	/* Make sure to configure the switches before initializing
 	 * the GPIO reset pin, so that we are connected to
 	 * the nRF9160 before enabling our interrupt.
 	 */
-	//if (IS_ENABLED(CONFIG_BOARD_PCA20035_NRF52840_RESET)) {
-		rc = reset_pin_configure(p0, p1);
+	if (IS_ENABLED(CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET)) {
+		int rc;
+		struct device *port;
+		const char *name;
+
+		LOG_INF("Enabling GPIO reset line on pin P%d.%02u..",
+			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PORT,
+			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN);
+
+		if (CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PORT == 0) {
+			name = DT_LABEL(DT_NODELABEL(gpio0));
+		} else {
+			name = DT_LABEL(DT_NODELABEL(gpio1));
+		}
+		port = device_get_binding(name);
+		if (!port) {
+			LOG_ERR("GPIO device %s not found!", name);
+			return -EIO;
+		}
+
+		rc = reset_pin_configure(port,
+			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN);
 		if (rc) {
 			LOG_ERR("Unable to configure reset pin, err %d", rc);
 			return -EIO;
 		}
-	//}
+	}
 
 	LOG_INF("Board configured.");
 
