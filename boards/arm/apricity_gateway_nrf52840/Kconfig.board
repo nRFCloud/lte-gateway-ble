@@ -11,5 +11,3 @@ config BOARD_APRICITY_GATEWAY_NRF52840
 # (board.c), so it is forced here to be enabled always, not only
 # enabled by default (in defconfig).
 select GPIO
-
-
