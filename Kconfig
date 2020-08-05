@@ -1,0 +1,16 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "LTE Gateway BLE"
+endmenu
+
+menu "Zephyr Kernel"
+source "$ZEPHYR_BASE/Kconfig.zephyr"
+endmenu
+
+module = LTE_GATEWAY_BLE
+module-str = LTE Gateway BLE
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"

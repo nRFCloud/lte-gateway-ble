@@ -1,5 +1,5 @@
-identifier: thingy91_nrf52840
-name: Thingy91-NRF52840
+identifier: apricity_gateway_nrf52840
+name: Apricity_gateway-NRF52840
 type: mcu
 arch: arm
 toolchain:

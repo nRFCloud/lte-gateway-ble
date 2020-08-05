@@ -5,7 +5,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -36,8 +35,7 @@
 
 #include "usb_uart_bridge.h"
 
-#define LOG_MODULE_NAME hci_uart
-LOG_MODULE_REGISTER(LOG_MODULE_NAME);
+LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
 static struct device *hci_uart_dev;
 static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
@@ -91,7 +89,6 @@ static int h4_read(struct device *uart, u8_t *buf,
 
 		rx = uart_fifo_read(uart, buf, len);
 		if (rx == 0) {
-			LOG_DBG("Got zero bytes from UART");
 			if (total < min) {
 				continue;
 			}
@@ -132,7 +129,8 @@ static struct net_buf *h4_cmd_recv(int *remaining)
 		LOG_ERR("No available command buffers!");
 	}
 
-	LOG_DBG("len %u", hdr.param_len);
+	LOG_DBG("h4_cmd_recv: hdr.opcode=0x%04x hdr.len=%u",
+		hdr.opcode, hdr.param_len);
 
 	return buf;
 }
@@ -246,6 +244,8 @@ static void tx_thread(void *p1, void *p2, void *p3)
 		/* Wait until a buffer is available */
 		buf = net_buf_get(&tx_queue, K_FOREVER);
 		/* Pass buffer to the stack */
+		LOG_HEXDUMP_DBG(buf->data, buf->len, "tx_thread");
+		LOG_DBG("net_buf_get() returned len %d", buf->len);
 		err = bt_send(buf);
 		if (err) {
 			LOG_ERR("Unable to send (err %d)", err);
@@ -263,24 +263,23 @@ static int h4_send(struct net_buf *buf)
 {
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf),
 		    buf->len);
-
-	switch (bt_buf_get_type(buf)) {
-	case BT_BUF_ACL_IN:
-		uart_poll_out(hci_uart_dev, H4_ACL);
-		break;
-	case BT_BUF_EVT:
-		uart_poll_out(hci_uart_dev, H4_EVT);
-		break;
-	default:
-		LOG_ERR("Unknown type %u", bt_buf_get_type(buf));
-		net_buf_unref(buf);
-		return -EINVAL;
-	}
+	u64_t start = k_uptime_get();
+	s64_t delta = 0;
+	u16_t len = buf->len;
 
 	while (buf->len) {
 		uart_poll_out(hci_uart_dev, net_buf_pull_u8(buf));
+		delta = k_uptime_delta(&start);
+		if (delta > 5000) {
+			LOG_ERR("Timeout waiting for h4_send() to complete!");
+			break;
+		}
 	}
-
+	LOG_DBG("h4_send: len %u of %u; reg %u of %u in %llu ms",
+		buf->len, len,
+		NRF_UARTE1->TXD.AMOUNT,
+		NRF_UARTE1->TXD.MAXCNT,
+		delta);
 	net_buf_unref(buf);
 
 	return 0;
@@ -332,10 +331,9 @@ void bt_ctlr_assert_handle(char *file, u32_t line)
 	}
 }
 #endif /* CONFIG_BT_CTLR_ASSERT_HANDLER */
-
 static int hci_uart_init(struct device *unused)
 {
-	LOG_DBG("");
+	LOG_DBG("init hci uart");
 
 	/* Derived from DT's bt-c2h-uart chosen node */
 	hci_uart_dev = device_get_binding(CONFIG_BT_CTLR_TO_HOST_UART_DEV_NAME);
@@ -356,22 +354,108 @@ static int hci_uart_init(struct device *unused)
 DEVICE_INIT(hci_uart, "hci_uart", &hci_uart_init, NULL, NULL,
 	    APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
 
+
+void set_leds(bool red, bool green, bool blue)
+{
+	struct device *port;
+	int red_pin = 26;
+	int green_pin = 4;
+	int blue_pin = 6;
+	int err;
+
+	port = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
+	if (!port) {
+		LOG_INF("GPIO0 device not found!");
+	} else {
+		err = gpio_pin_configure(port, red_pin,
+			red ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
+		if (err) {
+			LOG_INF("Pin %d error %d", red_pin, err);
+		}
+		err = gpio_pin_configure(port, green_pin,
+			green ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
+		if (err) {
+			LOG_INF("Pin %d error %d", green_pin, err);
+		}
+		err = gpio_pin_configure(port, blue_pin,
+			blue ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
+		if (err) {
+			LOG_INF("Pin %d error %d", blue_pin, err);
+		}
+	}
+}
+
+void output_string(int id, char *str)
+{
+	struct serial_dev *sd = &devs[id];
+	struct uart_data *rx = k_malloc(sizeof(struct uart_data));
+	if (rx) {
+		memset(rx, 0, sizeof(rx));
+		rx->len = strlen(str);
+		strcpy(rx->buffer, str);
+		k_fifo_put(sd->fifo, rx);
+		k_sem_give(&sd->sem);
+	}
+}
+
+#define DBG(x) output_string(0, x)
+
+extern bool ignore_reset;
 void main(void)
 {
+	ignore_reset = false;
+
 	/* incoming events and data from the controller */
 	static K_FIFO_DEFINE(rx_queue);
 	int err;
-
-        int ret;
+	int ret;
 	struct serial_dev *usb_0_sd = &devs[0];
 	struct serial_dev *uart_0_sd = &devs[1];
-	struct device *usb_0_dev, *uart_0_dev;
 
-	LOG_DBG("Start");
+	set_leds(true, false, false);
+	struct device *usb_0_dev = device_get_binding("CDC_ACM_0");
+	if (!usb_0_dev) {
+		LOG_INF("CDC ACM device not found");
+		return;
+	}
+
+	struct device *uart_0_dev = device_get_binding("UART_0");
+	if (!uart_0_dev) {
+		LOG_INF("UART 0 init failed");
+	}
+
+	usb_0_sd->num = -1;
+	usb_0_sd->dev = usb_0_dev;
+	usb_0_sd->fifo = &usb_0_tx_fifo;
+	usb_0_sd->peer = uart_0_sd;
+	k_sem_init(&usb_0_sd->sem, 0, 1);
+
+	uart_0_sd->num = 0;
+	uart_0_sd->dev = uart_0_dev;
+	uart_0_sd->fifo = &uart_0_tx_fifo;
+	uart_0_sd->peer = usb_0_sd;
+	k_sem_init(&uart_0_sd->sem, 0, 1);
+
+	uart_irq_callback_user_data_set(usb_0_dev, uart_interrupt_handler,
+		usb_0_sd);
+	uart_irq_callback_user_data_set(uart_0_dev, uart_interrupt_handler,
+		uart_0_sd);
+
+	ret = usb_enable(NULL);
+	if (ret != 0) {
+		LOG_INF("Failed to enable USB");
+		return;
+	}
+
+	uart_irq_rx_enable(usb_0_dev);
+	uart_irq_rx_enable(uart_0_dev);
+
 	__ASSERT(hci_uart_dev, "UART device is NULL");
 
 	/* Enable the raw interface, this will in turn open the HCI driver */
 	bt_enable_raw(&rx_queue);
+	set_leds(false, true, false);
+	LOG_INF("LTE Gateway BLE started");
 
 	if (IS_ENABLED(CONFIG_BT_WAIT_NOP)) {
 		/* Issue a Command Complete with NOP */
@@ -393,6 +477,7 @@ void main(void)
 			},
 		};
 
+		LOG_INF("Sending HCI Cmd Complete w/ NOP");
 		for (i = 0; i < sizeof(cc_evt); i++) {
 			uart_poll_out(hci_uart_dev,
 				      *(((const u8_t *)&cc_evt)+i));
@@ -406,52 +491,6 @@ void main(void)
 			K_THREAD_STACK_SIZEOF(tx_thread_stack), tx_thread,
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 
-
-
-
-
-
-
-
-	usb_0_dev = device_get_binding("CDC_ACM_0");
-	if (!usb_0_dev) {
-		printk("CDC ACM device not found\n");
-		return;
-	}
-
-	uart_0_dev = device_get_binding("UART_0");
-	if (!uart_0_dev) {
-		printk("UART 0 init failed\n");
-	}
-
-
-	usb_0_sd->dev = usb_0_dev;
-	usb_0_sd->fifo = &usb_0_tx_fifo;
-	usb_0_sd->peer = uart_0_sd;
-
-	uart_0_sd->dev = uart_0_dev;
-	uart_0_sd->fifo = &uart_0_tx_fifo;
-	uart_0_sd->peer = usb_0_sd;
-
-	k_sem_init(&usb_0_sd->sem, 0, 1);
-	k_sem_init(&uart_0_sd->sem, 0, 1);
-
-	uart_irq_callback_user_data_set(usb_0_dev, uart_interrupt_handler,
-		usb_0_sd);
-	uart_irq_callback_user_data_set(uart_0_dev, uart_interrupt_handler,
-		uart_0_sd);
-
-	ret = usb_enable(NULL);
-	if (ret != 0) {
-		printk("Failed to enable USB\n");
-		return;
-	}
-
-	uart_irq_rx_enable(usb_0_dev);
-	uart_irq_rx_enable(uart_0_dev);
-
-	printk("USB <--> UART bridge is now initialized\n");
-
 	struct k_poll_event events[2] = {
 		K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 						K_POLL_MODE_NOTIFY_ONLY,
@@ -461,40 +500,40 @@ void main(void)
 						&uart_0_sd->sem, 0),
 	};
 
-
-
-        /*Turn on LED*/
-        struct device *port;
-	port = device_get_binding(DT_GPIO_P0_DEV_NAME);
-        gpio_pin_configure(port, 0x04, GPIO_DIR_OUT);
-        gpio_pin_write(port, 0x04, 0);
+	LOG_INF("Entering loop");
+	set_leds(false, false, true);
 
 	while (1) {
 		struct net_buf *buf;
 
 		buf = net_buf_get(&rx_queue, K_NO_WAIT);
-		err = h4_send(buf);
-		if (err) {
-			LOG_ERR("Failed to send");
+		if (buf) {
+			err = h4_send(buf);
+			if (err) {
+				LOG_ERR("Failed to send");
+				set_leds(true, false, false);
+			}
+			else {
+				set_leds(false, true, false);
+			}
 		}
-
-
-
 		ret = k_poll(events, ARRAY_SIZE(events), K_NO_WAIT);
 		if (ret != 0) {
+			k_sleep(K_MSEC(1));
+			set_leds(false, false, true);
 			continue;
 		}
 
 		if (events[0].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[0].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&usb_0_sd->sem, K_NO_WAIT);
+			set_leds(false, true, true);
 			uart_irq_tx_enable(usb_0_dev);
 		} else if (events[1].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[1].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&uart_0_sd->sem, K_NO_WAIT);
+			set_leds(true, false, true);
 			uart_irq_tx_enable(uart_0_dev);
 		}
-
-
 	}
 }

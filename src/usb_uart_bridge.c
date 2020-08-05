@@ -13,9 +13,16 @@
 #include <hal/nrf_power.h>
 #include <power/reboot.h>
 #include <usb/usb_device.h>
-
+#include <logging/log.h>
+#include <logging/log_ctrl.h>
 
 #include "usb_uart_bridge.h"
+
+#define UART_IRQ_TX_EMPTY_LOOP_US 50
+#define UART_IRQ_TX_EMPTY_LOOP_COUNT 100
+/* #define LOG_CONTENTS */
+
+LOG_MODULE_REGISTER(usb_uart_bridge, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
 /* Overriding weak function to set iSerial runtime. */
 u8_t *usb_update_sn_string_descriptor(void)
@@ -82,7 +89,8 @@ void uart_interrupt_handler(void *user_data)
 				int err = oom_free(sd);
 
 				if (err) {
-					printk("Could not free memory. Rebooting.\n");
+					LOG_ERR("Could not free memory."
+						" Rebooting.");
 					sys_reboot(SYS_REBOOT_COLD);
 				}
 			}
@@ -97,6 +105,10 @@ void uart_interrupt_handler(void *user_data)
 			   (sd->rx->buffer[sd->rx->len - 1] == '\n') ||
 			   (sd->rx->buffer[sd->rx->len - 1] == '\r') ||
 			   (sd->rx->buffer[sd->rx->len - 1] == '\0')) {
+#if defined(LOG_CONTENTS)
+				LOG_HEXDUMP_DBG(sd->rx->buffer,
+					sd->rx->len, "uart_fifo_rx");
+#endif
 				k_fifo_put(peer_sd->fifo, sd->rx);
 				k_sem_give(&peer_sd->sem);
 
@@ -115,16 +127,30 @@ void uart_interrupt_handler(void *user_data)
 			return;
 		}
 
+#if defined(LOG_CONTENTS)
+		if (buf->len) {
+			LOG_HEXDUMP_DBG(buf->buffer, buf->len,
+				"uart_fifo_tx");
+		}
+#endif
+
 		while (buf->len > written) {
 			written += uart_fifo_fill(dev,
 						  &buf->buffer[written],
 						  buf->len - written);
 		}
 
+		int i = 0;
+
 		while (!uart_irq_tx_complete(dev)) {
 			/* Wait for the last byte to get
 			 * shifted out of the module
 			 */
+			k_sleep(K_USEC(UART_IRQ_TX_EMPTY_LOOP_US));
+			if (i++ > UART_IRQ_TX_EMPTY_LOOP_COUNT) {
+				LOG_ERR("timeout on tx complete");
+				break;
+			}
 		}
 
 		if (k_fifo_is_empty(sd->fifo)) {
@@ -141,9 +167,9 @@ void power_thread(void)
 		if (!nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {
 			nrf_power_system_off(NRF_POWER);
 		}
-		k_sleep(100);
+		k_sleep(K_MSEC(100));
 	}
 }
 
 K_THREAD_DEFINE(power_thread_id, POWER_THREAD_STACKSIZE, power_thread,
-		NULL, NULL, NULL, POWER_THREAD_PRIORITY, 0, K_NO_WAIT);
+		NULL, NULL, NULL, POWER_THREAD_PRIORITY, 0, 0);

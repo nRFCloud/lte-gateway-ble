@@ -28,6 +28,7 @@ static struct serial_dev {
 	struct k_fifo *fifo;
 	struct k_sem sem;
 	struct uart_data *rx;
+	int num;
 } devs[2];
 
 

@@ -1,13 +1,13 @@
-# nRF52840 THINGY91 board configuration
+# nRF52840 APRICITY_GATEWAY board configuration
 #
-# Copyright (c) 2019 Nordic Semiconductor ASA
+# Copyright (c) 2020 Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
 
-if BOARD_THINGY91_NRF52840
+if BOARD_APRICITY_GATEWAY_NRF52840
 
 config BOARD
-	default "thingy91_nrf52840"
+	default "apricity_gateway_nrf52840"
 
 config BT_CTLR
 	default BT
@@ -26,4 +26,4 @@ config USB_DEVICE_STACK
 
 endif # USB
 
-endif # BOARD_THINGY91_NRF52840
+endif # BOARD_APRICITY_GATEWAY_NRF52840
