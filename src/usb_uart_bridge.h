@@ -1,3 +1,5 @@
+#ifndef _USB_UART_BRIDGE_H_
+#define _USB_UART_BRIDGE_H_
 
 #define POWER_THREAD_STACKSIZE		CONFIG_IDLE_STACK_SIZE
 #define POWER_THREAD_PRIORITY		K_LOWEST_APPLICATION_THREAD_PRIO
@@ -34,3 +36,5 @@ static struct serial_dev {
 
 void uart_interrupt_handler(void *user_data);
 void power_thread(void);
+
+#endif

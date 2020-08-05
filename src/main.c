@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2016 Nordic Semiconductor ASA
  * Copyright (c) 2015-2016 Intel Corporation
@@ -129,7 +128,7 @@ static struct net_buf *h4_cmd_recv(int *remaining)
 		LOG_ERR("No available command buffers!");
 	}
 
-	LOG_DBG("h4_cmd_recv: hdr.opcode=0x%04x hdr.len=%u",
+	LOG_DBG("hdr.opcode=0x%04x hdr.len=%u",
 		hdr.opcode, hdr.param_len);
 
 	return buf;
@@ -271,11 +270,11 @@ static int h4_send(struct net_buf *buf)
 		uart_poll_out(hci_uart_dev, net_buf_pull_u8(buf));
 		delta = k_uptime_delta(&start);
 		if (delta > 5000) {
-			LOG_ERR("Timeout waiting for h4_send() to complete!");
+			LOG_ERR("Timeout!");
 			break;
 		}
 	}
-	LOG_DBG("h4_send: len %u of %u; reg %u of %u in %llu ms",
+	LOG_DBG("Result: len %u of %u; reg %u of %u in %llu ms",
 		buf->len, len,
 		NRF_UARTE1->TXD.AMOUNT,
 		NRF_UARTE1->TXD.MAXCNT,
@@ -389,6 +388,7 @@ void output_string(int id, char *str)
 {
 	struct serial_dev *sd = &devs[id];
 	struct uart_data *rx = k_malloc(sizeof(struct uart_data));
+
 	if (rx) {
 		memset(rx, 0, sizeof(rx));
 		rx->len = strlen(str);
@@ -413,13 +413,16 @@ void main(void)
 	struct serial_dev *uart_0_sd = &devs[1];
 
 	set_leds(true, false, false);
+
 	struct device *usb_0_dev = device_get_binding("CDC_ACM_0");
+
 	if (!usb_0_dev) {
 		LOG_INF("CDC ACM device not found");
 		return;
 	}
 
 	struct device *uart_0_dev = device_get_binding("UART_0");
+
 	if (!uart_0_dev) {
 		LOG_INF("UART 0 init failed");
 	}
