@@ -8,7 +8,7 @@ menu "LTE Gateway BLE"
 endmenu
 
 menu "Zephyr Kernel"
-source "$ZEPHYR_BASE/Kconfig.zephyr"
+source "Kconfig.zephyr"
 endmenu
 
 module = LTE_GATEWAY_BLE
