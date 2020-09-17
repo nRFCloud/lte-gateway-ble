@@ -9,6 +9,7 @@
 #include <drivers/uart.h>
 #include <nrfx.h>
 #include <string.h>
+#include <stdio.h>
 #include <hal/nrf_power.h>
 #include <power/reboot.h>
 #include <usb/usb_device.h>
@@ -17,8 +18,7 @@
 
 #include "usb_uart_bridge.h"
 
-#define UART_IRQ_TX_EMPTY_LOOP_US 50
-#define UART_IRQ_TX_EMPTY_LOOP_COUNT 100
+#define UART_IRQ_TX_EMPTY_LOOP_COUNT 1000000
 /* #define LOG_CONTENTS */
 
 LOG_MODULE_REGISTER(usb_uart_bridge, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
@@ -74,6 +74,10 @@ void uart_interrupt_handler(void *user_data)
 	struct serial_dev *sd = user_data;
 	struct device *dev = sd->dev;
 	struct serial_dev *peer_sd = (struct serial_dev *)sd->peer;
+#if defined(LOG_CONTENTS)
+	static char rxlabel[32];
+	static char txlabel[32];
+#endif
 
 	uart_irq_update(dev);
 
@@ -105,8 +109,11 @@ void uart_interrupt_handler(void *user_data)
 			   (sd->rx->buffer[sd->rx->len - 1] == '\r') ||
 			   (sd->rx->buffer[sd->rx->len - 1] == '\0')) {
 #if defined(LOG_CONTENTS)
+				sprintf(rxlabel, "uart_fifo_rx %d", sd->num);
 				LOG_HEXDUMP_DBG(sd->rx->buffer,
-					sd->rx->len, "uart_fifo_rx");
+					sd->rx->len, rxlabel);
+#else
+				LOG_DBG("rx%d-%d RCVD", sd->num, sd->rx->len);
 #endif
 				k_fifo_put(peer_sd->fifo, sd->rx);
 				k_sem_give(&peer_sd->sem);
@@ -128,8 +135,13 @@ void uart_interrupt_handler(void *user_data)
 
 #if defined(LOG_CONTENTS)
 		if (buf->len) {
+			sprintf(txlabel, "uart_fifo_tx %d", sd->num);
 			LOG_HEXDUMP_DBG(buf->buffer, buf->len,
-				"uart_fifo_tx");
+				txlabel);
+		}
+#else
+		if (buf->len) {
+			LOG_DBG("tx%d-%d SENT", sd->num, buf->len);
 		}
 #endif
 
@@ -145,7 +157,6 @@ void uart_interrupt_handler(void *user_data)
 			/* Wait for the last byte to get
 			 * shifted out of the module
 			 */
-			k_sleep(K_USEC(UART_IRQ_TX_EMPTY_LOOP_US));
 			if (i++ > UART_IRQ_TX_EMPTY_LOOP_COUNT) {
 				LOG_ERR("timeout on tx complete");
 				break;
