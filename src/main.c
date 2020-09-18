@@ -383,45 +383,8 @@ void main(void)
 	int ret;
 	struct serial_dev *usb_0_sd = &devs[0];
 	struct serial_dev *uart_0_sd = &devs[1];
-
-	struct device *usb_0_dev = device_get_binding("CDC_ACM_0");
-
-	if (!usb_0_dev) {
-		LOG_INF("CDC ACM device not found");
-		return;
-	}
-
-	struct device *uart_0_dev = device_get_binding("UART_0");
-
-	if (!uart_0_dev) {
-		LOG_INF("UART 0 init failed");
-	}
-
-	usb_0_sd->num = -1;
-	usb_0_sd->dev = usb_0_dev;
-	usb_0_sd->fifo = &usb_0_tx_fifo;
-	usb_0_sd->peer = uart_0_sd;
-	k_sem_init(&usb_0_sd->sem, 0, 1);
-
-	uart_0_sd->num = 0;
-	uart_0_sd->dev = uart_0_dev;
-	uart_0_sd->fifo = &uart_0_tx_fifo;
-	uart_0_sd->peer = usb_0_sd;
-	k_sem_init(&uart_0_sd->sem, 0, 1);
-
-	uart_irq_callback_user_data_set(usb_0_dev, uart_interrupt_handler,
-		usb_0_sd);
-	uart_irq_callback_user_data_set(uart_0_dev, uart_interrupt_handler,
-		uart_0_sd);
-
-	ret = usb_enable(NULL);
-	if (ret != 0) {
-		LOG_INF("Failed to enable USB");
-		return;
-	}
-
-	uart_irq_rx_enable(usb_0_dev);
-	uart_irq_rx_enable(uart_0_dev);
+	struct device *usb_0_dev;
+	struct device *uart_0_dev;
 
 	__ASSERT(hci_uart_dev, "UART device is NULL");
 
@@ -463,6 +426,44 @@ void main(void)
 			K_THREAD_STACK_SIZEOF(tx_thread_stack), tx_thread,
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 
+	usb_0_dev = device_get_binding("CDC_ACM_0");
+	if (!usb_0_dev) {
+		LOG_INF("CDC ACM device not found");
+		return;
+	}
+
+	uart_0_dev = device_get_binding("UART_0");
+	if (!uart_0_dev) {
+		LOG_INF("UART 0 init failed");
+	}
+
+	usb_0_sd->num = -1;
+	usb_0_sd->dev = usb_0_dev;
+	usb_0_sd->fifo = &usb_0_tx_fifo;
+	usb_0_sd->peer = uart_0_sd;
+
+	uart_0_sd->num = 0;
+	uart_0_sd->dev = uart_0_dev;
+	uart_0_sd->fifo = &uart_0_tx_fifo;
+	uart_0_sd->peer = usb_0_sd;
+
+	k_sem_init(&usb_0_sd->sem, 0, 1);
+	k_sem_init(&uart_0_sd->sem, 0, 1);
+
+	uart_irq_callback_user_data_set(usb_0_dev, uart_interrupt_handler,
+		usb_0_sd);
+	uart_irq_callback_user_data_set(uart_0_dev, uart_interrupt_handler,
+		uart_0_sd);
+
+	ret = usb_enable(NULL);
+	if (ret != 0) {
+		LOG_INF("Failed to enable USB");
+		return;
+	}
+
+	uart_irq_rx_enable(usb_0_dev);
+	uart_irq_rx_enable(uart_0_dev);
+
 	struct k_poll_event events[2] = {
 		K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 						K_POLL_MODE_NOTIFY_ONLY,
@@ -493,10 +494,12 @@ void main(void)
 		if (events[0].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[0].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&usb_0_sd->sem, K_NO_WAIT);
+			LOG_DBG("en usb0 tx");
 			uart_irq_tx_enable(usb_0_dev);
 		} else if (events[1].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[1].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&uart_0_sd->sem, K_NO_WAIT);
+			LOG_DBG("en uart0 tx");
 			uart_irq_tx_enable(uart_0_dev);
 		}
 	}
