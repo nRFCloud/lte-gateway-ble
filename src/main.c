@@ -36,15 +36,6 @@
 
 LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
-static struct device *hci_uart_dev;
-static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
-static struct k_thread tx_thread_data;
-
-/* HCI command buffers */
-#define CMD_BUF_SIZE BT_BUF_RX_SIZE
-NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
-			  NULL);
-
 #if defined(CONFIG_BT_CTLR_TX_BUFFER_SIZE)
 #define BT_L2CAP_MTU (CONFIG_BT_CTLR_TX_BUFFER_SIZE - BT_L2CAP_HDR_SIZE)
 #else
@@ -59,10 +50,7 @@ NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
 #else
 #define TX_BUF_COUNT 6
 #endif
-
-NET_BUF_POOL_FIXED_DEFINE(acl_tx_pool, TX_BUF_COUNT, BT_BUF_ACL_SIZE, NULL);
-
-static K_FIFO_DEFINE(tx_queue);
+#define CMD_BUF_SIZE BT_BUF_RX_SIZE
 
 #define H4_CMD 0x01
 #define H4_ACL 0x02
@@ -77,6 +65,20 @@ static K_FIFO_DEFINE(tx_queue);
  * often.
  */
 #define H4_DISCARD_LEN 33
+
+#define H4_SEND_TIMEOUT 5000
+
+static struct device *hci_uart_dev;
+static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
+static struct k_thread tx_thread_data;
+
+/* HCI command buffers */
+NET_BUF_POOL_FIXED_DEFINE(acl_tx_pool, TX_BUF_COUNT, BT_BUF_ACL_SIZE, NULL);
+
+static K_FIFO_DEFINE(tx_queue);
+
+NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
+			  NULL);
 
 static int h4_read(struct device *uart, u8_t *buf,
 		   size_t len, size_t min)
@@ -269,7 +271,7 @@ static int h4_send(struct net_buf *buf)
 	while (buf->len) {
 		uart_poll_out(hci_uart_dev, net_buf_pull_u8(buf));
 		delta = k_uptime_delta(&start);
-		if (delta > 5000) {
+		if (delta > H4_SEND_TIMEOUT) {
 			LOG_ERR("Timeout!");
 			break;
 		}
@@ -354,36 +356,6 @@ DEVICE_INIT(hci_uart, "hci_uart", &hci_uart_init, NULL, NULL,
 	    APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
 
 
-void set_leds(bool red, bool green, bool blue)
-{
-	struct device *port;
-	int red_pin = 26;
-	int green_pin = 4;
-	int blue_pin = 6;
-	int err;
-
-	port = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
-	if (!port) {
-		LOG_INF("GPIO0 device not found!");
-	} else {
-		err = gpio_pin_configure(port, red_pin,
-			red ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
-		if (err) {
-			LOG_INF("Pin %d error %d", red_pin, err);
-		}
-		err = gpio_pin_configure(port, green_pin,
-			green ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
-		if (err) {
-			LOG_INF("Pin %d error %d", green_pin, err);
-		}
-		err = gpio_pin_configure(port, blue_pin,
-			blue ? GPIO_OUTPUT_LOW : GPIO_OUTPUT_HIGH);
-		if (err) {
-			LOG_INF("Pin %d error %d", blue_pin, err);
-		}
-	}
-}
-
 void output_string(int id, char *str)
 {
 	struct serial_dev *sd = &devs[id];
@@ -411,8 +383,6 @@ void main(void)
 	int ret;
 	struct serial_dev *usb_0_sd = &devs[0];
 	struct serial_dev *uart_0_sd = &devs[1];
-
-	set_leds(true, false, false);
 
 	struct device *usb_0_dev = device_get_binding("CDC_ACM_0");
 
@@ -457,7 +427,6 @@ void main(void)
 
 	/* Enable the raw interface, this will in turn open the HCI driver */
 	bt_enable_raw(&rx_queue);
-	set_leds(false, true, false);
 	LOG_INF("LTE Gateway BLE started");
 
 	if (IS_ENABLED(CONFIG_BT_WAIT_NOP)) {
@@ -504,7 +473,6 @@ void main(void)
 	};
 
 	LOG_INF("Entering loop");
-	set_leds(false, false, true);
 
 	while (1) {
 		struct net_buf *buf;
@@ -514,28 +482,21 @@ void main(void)
 			err = h4_send(buf);
 			if (err) {
 				LOG_ERR("Failed to send");
-				set_leds(true, false, false);
-			}
-			else {
-				set_leds(false, true, false);
 			}
 		}
 		ret = k_poll(events, ARRAY_SIZE(events), K_NO_WAIT);
 		if (ret != 0) {
 			k_sleep(K_MSEC(1));
-			set_leds(false, false, true);
 			continue;
 		}
 
 		if (events[0].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[0].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&usb_0_sd->sem, K_NO_WAIT);
-			set_leds(false, true, true);
 			uart_irq_tx_enable(usb_0_dev);
 		} else if (events[1].state == K_POLL_TYPE_SEM_AVAILABLE) {
 			events[1].state = K_POLL_STATE_NOT_READY;
 			k_sem_take(&uart_0_sd->sem, K_NO_WAIT);
-			set_leds(true, false, true);
 			uart_irq_tx_enable(uart_0_dev);
 		}
 	}
