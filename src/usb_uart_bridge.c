@@ -69,10 +69,9 @@ static int oom_free(struct serial_dev *sd)
 	return -1; /* Was not able to free any heap memory */
 }
 
-void uart_interrupt_handler(void *user_data)
+void uart_interrupt_handler(struct device *dev, void *user_data)
 {
 	struct serial_dev *sd = user_data;
-	struct device *dev = sd->dev;
 	struct serial_dev *peer_sd = (struct serial_dev *)sd->peer;
 #if defined(LOG_CONTENTS)
 	static char rxlabel[32];

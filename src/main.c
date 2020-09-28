@@ -36,6 +36,22 @@
 
 LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
+/* #define DEBUG_UART_PINS */
+#if defined(DEBUG_UART_PINS)
+#define UART0 DT_NODELABEL(uart0)
+#define UART0_TX DT_PROP(UART0, tx_pin)
+#define UART0_RX DT_PROP(UART0, rx_pin)
+#define UART0_RTS DT_PROP(UART0, rts_pin)
+#define UART0_CTS DT_PROP(UART0, cts_pin)
+#define UART0_SPEED DT_PROP(UART0, current_speed)
+#define UART1 DT_NODELABEL(uart1)
+#define UART1_TX DT_PROP(UART1, tx_pin)
+#define UART1_RX DT_PROP(UART1, rx_pin)
+#define UART1_RTS DT_PROP(UART1, rts_pin)
+#define UART1_CTS DT_PROP(UART1, cts_pin)
+#define UART1_SPEED DT_PROP(UART1, current_speed)
+#endif
+
 #if defined(CONFIG_BT_CTLR_TX_BUFFER_SIZE)
 #define BT_L2CAP_MTU (CONFIG_BT_CTLR_TX_BUFFER_SIZE - BT_L2CAP_HDR_SIZE)
 #else
@@ -76,6 +92,9 @@ static struct k_thread tx_thread_data;
 NET_BUF_POOL_FIXED_DEFINE(acl_tx_pool, TX_BUF_COUNT, BT_BUF_ACL_SIZE, NULL);
 
 static K_FIFO_DEFINE(tx_queue);
+
+/* RX in terms of bluetooth communication */
+static K_FIFO_DEFINE(uart_tx_queue);
 
 NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
 			  NULL);
@@ -159,24 +178,44 @@ static struct net_buf *h4_acl_recv(int *remaining)
 	return buf;
 }
 
-static void bt_uart_isr(struct device *unused)
+static void tx_isr(void)
+{
+	static struct net_buf *buf;
+	int len;
+
+	if (!buf) {
+		buf = net_buf_get(&uart_tx_queue, K_NO_WAIT);
+		if (!buf) {
+			uart_irq_tx_disable(hci_uart_dev);
+			return;
+		}
+	}
+
+	len = uart_fifo_fill(hci_uart_dev, buf->data, buf->len);
+	net_buf_pull(buf, len);
+	if (!buf->len) {
+		net_buf_unref(buf);
+		buf = NULL;
+	}
+}
+
+static void bt_uart_isr(struct device *unused, void *user_data)
 {
 	static struct net_buf *buf;
 	static int remaining;
 
 	ARG_UNUSED(unused);
+	ARG_UNUSED(user_data);
 
 	while (uart_irq_update(hci_uart_dev) &&
 	       uart_irq_is_pending(hci_uart_dev)) {
 		int read;
 
-		if (!uart_irq_rx_ready(hci_uart_dev)) {
-			if (uart_irq_tx_ready(hci_uart_dev)) {
-				LOG_DBG("transmit ready");
-			} else {
-				LOG_DBG("spurious interrupt");
-			}
-			/* Only the UART RX path is interrupt-enabled */
+		if (uart_irq_tx_ready(hci_uart_dev)) {
+			tx_isr();
+		} else if (!uart_irq_rx_ready(hci_uart_dev)) {
+			/* Only the UART TX and RX path are interrupt-enabled */
+			LOG_DBG("spurious interrupt");
 			break;
 		}
 
@@ -264,24 +303,9 @@ static int h4_send(struct net_buf *buf)
 {
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf),
 		    buf->len);
-	u64_t start = k_uptime_get();
-	s64_t delta = 0;
-	u16_t len = buf->len;
 
-	while (buf->len) {
-		uart_poll_out(hci_uart_dev, net_buf_pull_u8(buf));
-		delta = k_uptime_delta(&start);
-		if (delta > H4_SEND_TIMEOUT) {
-			LOG_ERR("Timeout!");
-			break;
-		}
-	}
-	LOG_DBG("Result: len %u of %u; reg %u of %u in %llu ms",
-		buf->len, len,
-		NRF_UARTE1->TXD.AMOUNT,
-		NRF_UARTE1->TXD.MAXCNT,
-		delta);
-	net_buf_unref(buf);
+	net_buf_put(&uart_tx_queue, buf);
+	uart_irq_tx_enable(hci_uart_dev);
 
 	return 0;
 }
@@ -372,6 +396,33 @@ void output_string(int id, char *str)
 
 #define DBG(x) output_string(0, x)
 
+static void log_uart_pins(void)
+{
+#if defined(DEBUG_UART_PINS)
+	struct uart_config config;
+	struct device *uart_0_dev = device_get_binding("UART_0");
+	struct device *uart_1_dev = device_get_binding("UART_1");
+
+	LOG_INF("UART0 tx:%d, rx:%d, rts:%d, cts:%d, speed:%d",
+		UART0_TX, UART0_RX, UART0_RTS, UART0_CTS, UART0_SPEED);
+	LOG_INF("UART1 tx:%d, rx:%d, rts:%d, cts:%d, speed:%d",
+		UART1_TX, UART1_RX, UART1_RTS, UART1_CTS, UART1_SPEED);
+	k_sleep(K_MSEC(50));
+
+	uart_config_get(uart_0_dev, &config);
+	LOG_INF("UART0 speed:%u, flow:%d", config.baudrate,
+		config.flow_ctrl);
+	k_sleep(K_MSEC(50));
+
+	uart_config_get(uart_1_dev, &config);
+	LOG_INF("UART1 speed:%u, flow:%d", config.baudrate,
+		config.flow_ctrl);
+
+	LOG_INF("Reset pin:%d",
+		CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN);
+#endif
+}
+
 extern bool ignore_reset;
 void main(void)
 {
@@ -391,6 +442,7 @@ void main(void)
 	/* Enable the raw interface, this will in turn open the HCI driver */
 	bt_enable_raw(&rx_queue);
 	LOG_INF("LTE Gateway BLE started");
+	log_uart_pins();
 
 	if (IS_ENABLED(CONFIG_BT_WAIT_NOP)) {
 		/* Issue a Command Complete with NOP */
@@ -425,6 +477,7 @@ void main(void)
 	k_thread_create(&tx_thread_data, tx_thread_stack,
 			K_THREAD_STACK_SIZEOF(tx_thread_stack), tx_thread,
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
+	k_thread_name_set(&tx_thread_data, "HCI uart TX");
 
 	usb_0_dev = device_get_binding("CDC_ACM_0");
 	if (!usb_0_dev) {

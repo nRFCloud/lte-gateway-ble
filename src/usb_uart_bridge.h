@@ -34,7 +34,7 @@ static struct serial_dev {
 } devs[2];
 
 
-void uart_interrupt_handler(void *user_data);
+void uart_interrupt_handler(struct device *dev, void *user_data);
 void power_thread(void);
 
 #endif
