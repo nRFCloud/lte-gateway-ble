@@ -24,15 +24,15 @@
 LOG_MODULE_REGISTER(usb_uart_bridge, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
 /* Overriding weak function to set iSerial runtime. */
-u8_t *usb_update_sn_string_descriptor(void)
+uint8_t *usb_update_sn_string_descriptor(void)
 {
-	static u8_t buf[] = "PCA20035_12PLACEHLDRS";
+	static uint8_t buf[] = "PCA20035_12PLACEHLDRS";
 
 	snprintk(&buf[9], 13, "%04X%08X",
 		(uint32_t)(NRF_FICR->DEVICEADDR[1] & 0x0000FFFF)|0x0000C000,
 		(uint32_t)NRF_FICR->DEVICEADDR[0]);
 
-	return (u8_t *)&buf;
+	return (uint8_t *)&buf;
 }
 
 
@@ -69,10 +69,9 @@ static int oom_free(struct serial_dev *sd)
 	return -1; /* Was not able to free any heap memory */
 }
 
-void uart_interrupt_handler(void *user_data)
+void uart_interrupt_handler(struct device *dev, void *user_data)
 {
 	struct serial_dev *sd = user_data;
-	struct device *dev = sd->dev;
 	struct serial_dev *peer_sd = (struct serial_dev *)sd->peer;
 #if defined(LOG_CONTENTS)
 	static char rxlabel[32];
@@ -125,7 +124,7 @@ void uart_interrupt_handler(void *user_data)
 
 	if (uart_irq_tx_ready(dev)) {
 		struct uart_data *buf = k_fifo_get(sd->fifo, K_NO_WAIT);
-		u16_t written = 0;
+		uint16_t written = 0;
 
 		/* Nothing in the FIFO, nothing to send */
 		if (!buf) {

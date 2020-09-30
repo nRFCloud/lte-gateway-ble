@@ -25,15 +25,15 @@ LOG_MODULE_REGISTER(board_control, CONFIG_LOG_OVERRIDE_LEVEL);
  */
 
 __packed struct pin_config {
-	u8_t pin;
-	u8_t val;
+	uint8_t pin;
+	uint8_t val;
 };
 
 bool ignore_reset = true;
 static void chip_reset(struct device *gpio,
-		       struct gpio_callback *cb, u32_t pins)
+		       struct gpio_callback *cb, uint32_t pins)
 {
-	const u32_t stamp = k_cycle_get_32();
+	const uint32_t stamp = k_cycle_get_32();
 
 	printk("GPIO reset line asserted, device reset.\n");
 	printk("Bye @ cycle32 %u\n", stamp);
@@ -43,7 +43,7 @@ static void chip_reset(struct device *gpio,
 	}
 }
 
-static void reset_pin_wait_low(struct device *port, u32_t pin)
+static void reset_pin_wait_low(struct device *port, uint32_t pin)
 {
 	int val;
 
@@ -53,7 +53,7 @@ static void reset_pin_wait_low(struct device *port, u32_t pin)
 	} while (val > 0);
 }
 
-static int reset_pin_configure(struct device *port, u32_t pin)
+static int reset_pin_configure(struct device *port, uint32_t pin)
 {
 	int err;
 

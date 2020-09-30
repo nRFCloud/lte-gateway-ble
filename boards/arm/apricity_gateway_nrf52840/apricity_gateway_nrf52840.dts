@@ -51,6 +51,7 @@
 	compatible = "nordic,nrf-uarte";
 	current-speed = <1000000>;
 	status = "okay";
+	hw-flow-control;
 	tx-pin = < 20 >;
 	rx-pin = < 22 >;
 	rts-pin = < 24 >;
