@@ -20,8 +20,8 @@ static K_FIFO_DEFINE(uart_0_tx_fifo);
 
 struct uart_data {
 	void *fifo_reserved;
-	u8_t buffer[UART_BUF_SIZE];
-	u16_t len;
+	uint8_t buffer[UART_BUF_SIZE];
+	uint16_t len;
 };
 
 static struct serial_dev {
