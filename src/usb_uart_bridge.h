@@ -25,7 +25,7 @@ struct uart_data {
 };
 
 static struct serial_dev {
-	struct device *dev;
+	const struct device *dev;
 	void *peer;
 	struct k_fifo *fifo;
 	struct k_sem sem;
@@ -34,7 +34,7 @@ static struct serial_dev {
 } devs[2];
 
 
-void uart_interrupt_handler(struct device *dev, void *user_data);
+void uart_interrupt_handler(const struct device *dev, void *user_data);
 void power_thread(void);
 
 #endif

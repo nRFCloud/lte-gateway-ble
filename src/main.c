@@ -73,6 +73,12 @@ LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 #define H4_SCO 0x03
 #define H4_EVT 0x04
 
+/* Receiver states. */
+#define ST_IDLE 0	/* Waiting for packet type. */
+#define ST_HDR 1	/* Receiving packet header. */
+#define ST_PAYLOAD 2	/* Receiving packet payload. */
+#define ST_DISCARD 3	/* Dropping packet. */
+
 /* Length of a discard/flush buffer.
  * This is sized to align with a BLE HCI packet:
  * 1 byte H:4 header + 32 bytes ACL/event data
@@ -84,7 +90,7 @@ LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 
 #define H4_SEND_TIMEOUT 5000
 
-static struct device *hci_uart_dev;
+static const struct device *hci_uart_dev;
 static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
 static struct k_thread tx_thread_data;
 
@@ -99,83 +105,146 @@ static K_FIFO_DEFINE(uart_tx_queue);
 NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
 			  NULL);
 
-static int h4_read(struct device *uart, uint8_t *buf,
-		   size_t len, size_t min)
+static int h4_read(const struct device *uart, uint8_t *buf, size_t len)
 {
-	int total = 0;
+	int rx = uart_fifo_read(uart, buf, len);
 
-	while (len) {
-		int rx;
+	LOG_DBG("read %d req %d", rx, len);
 
-		rx = uart_fifo_read(uart, buf, len);
-		if (rx == 0) {
-			if (total < min) {
-				continue;
+	return rx;
+}
+
+static bool valid_type(uint8_t type)
+{
+	return (type == H4_CMD) | (type == H4_ACL);
+}
+
+/* Function assumes that type is validated and only CMD or ACL will be used. */
+static uint32_t get_len(const uint8_t *hdr_buf, uint8_t type)
+{
+	return (type == BT_BUF_CMD) ?
+		((const struct bt_hci_cmd_hdr *)hdr_buf)->param_len :
+		sys_le16_to_cpu(((const struct bt_hci_acl_hdr *)hdr_buf)->len);
+}
+
+/* Function assumes that type is validated and only CMD or ACL will be used. */
+static int hdr_len(uint8_t type)
+{
+	return (type == H4_CMD) ?
+		sizeof(struct bt_hci_cmd_hdr) : sizeof(struct bt_hci_acl_hdr);
+}
+
+static struct net_buf *get_buf(uint8_t type)
+{
+	struct net_buf *buf;
+
+	if (type == H4_CMD) {
+		buf = net_buf_alloc(&cmd_tx_pool, K_NO_WAIT);
+		if (buf) {
+			bt_buf_set_type(buf, BT_BUF_CMD);
+		} else {
+			LOG_ERR("No available command buffers!");
+		}
+	} else {
+		buf = net_buf_alloc(&acl_tx_pool, K_NO_WAIT);
+		if (buf) {
+			bt_buf_set_type(buf, BT_BUF_ACL_OUT);
+		} else {
+			LOG_ERR("No available ACL buffers!");
+		}
+	}
+	return buf;
+}
+
+static void rx_isr(void)
+{
+	static struct net_buf *buf;
+	static int remaining;
+	static uint8_t state;
+	static uint8_t type;
+	static uint8_t hdr_buf[MAX(sizeof(struct bt_hci_cmd_hdr),
+			sizeof(struct bt_hci_acl_hdr))];
+	int read;
+
+	do {
+		switch (state) {
+		case ST_IDLE:
+			/* Get packet type */
+			read = h4_read(hci_uart_dev, &type, sizeof(type));
+			/* since we read in loop until no data is in the fifo,
+			 * it is possible that read = 0.
+			 */
+			if (read) {
+				if (valid_type(type)) {
+					/* Get expected header size and switch
+					 * to receiving header.
+					 */
+					remaining = hdr_len(type);
+					state = ST_HDR;
+				} else {
+					LOG_WRN("Unknown header %d", type);
+				}
+			}
+			break;
+		case ST_HDR:
+			read = h4_read(hci_uart_dev,
+				       &hdr_buf[hdr_len(type) - remaining],
+				       remaining);
+			remaining -= read;
+			if (remaining == 0) {
+				/* Header received. Allocate buffer and get
+				 * payload length. If allocation fails leave
+				 * interrupt. On failed allocation state machine
+				 * is reset.
+				 */
+				buf = get_buf(type);
+				if (!buf) {
+					state = ST_IDLE;
+					return;
+				}
+
+				remaining = get_len(hdr_buf, type);
+
+				net_buf_add_mem(buf, hdr_buf, hdr_len(type));
+				if (remaining > net_buf_tailroom(buf)) {
+					LOG_ERR("Not enough space in buffer");
+					net_buf_unref(buf);
+					state = ST_DISCARD;
+				} else {
+					state = ST_PAYLOAD;
+				}
+			}
+			break;
+		case ST_PAYLOAD:
+			read = h4_read(hci_uart_dev, net_buf_tail(buf),
+				       remaining);
+			buf->len += read;
+			remaining -= read;
+			if (remaining == 0) {
+				/* Packet received */
+				LOG_DBG("putting RX packet in queue.");
+				net_buf_put(&tx_queue, buf);
+				state = ST_IDLE;
+			}
+			break;
+		case ST_DISCARD:
+		{
+			uint8_t discard[H4_DISCARD_LEN];
+			size_t to_read = MIN(remaining, sizeof(discard));
+
+			read = h4_read(hci_uart_dev, discard, to_read);
+			remaining -= read;
+			if (remaining == 0) {
+				state = ST_IDLE;
 			}
 			break;
 		}
-
-		LOG_DBG("read %d remaining %d", rx, len - rx);
-		len -= rx;
-		total += rx;
-		buf += rx;
-	}
-
-	return total;
-}
-
-static size_t h4_discard(struct device *uart, size_t len)
-{
-	uint8_t buf[H4_DISCARD_LEN];
-
-	return uart_fifo_read(uart, buf, MIN(len, sizeof(buf)));
-}
-
-static struct net_buf *h4_cmd_recv(int *remaining)
-{
-	struct bt_hci_cmd_hdr hdr;
-	struct net_buf *buf;
-
-	/* We can ignore the return value since we pass len == min */
-	h4_read(hci_uart_dev, (void *)&hdr, sizeof(hdr), sizeof(hdr));
-
-	*remaining = hdr.param_len;
-
-	buf = net_buf_alloc(&cmd_tx_pool, K_NO_WAIT);
-	if (buf) {
-		bt_buf_set_type(buf, BT_BUF_CMD);
-		net_buf_add_mem(buf, &hdr, sizeof(hdr));
-	} else {
-		LOG_ERR("No available command buffers!");
-	}
-
-	LOG_DBG("hdr.opcode=0x%04x hdr.len=%u",
-		hdr.opcode, hdr.param_len);
-
-	return buf;
-}
-
-static struct net_buf *h4_acl_recv(int *remaining)
-{
-	struct bt_hci_acl_hdr hdr;
-	struct net_buf *buf;
-
-	/* We can ignore the return value since we pass len == min */
-	h4_read(hci_uart_dev, (void *)&hdr, sizeof(hdr), sizeof(hdr));
-
-	buf = net_buf_alloc(&acl_tx_pool, K_NO_WAIT);
-	if (buf) {
-		bt_buf_set_type(buf, BT_BUF_ACL_OUT);
-		net_buf_add_mem(buf, &hdr, sizeof(hdr));
-	} else {
-		LOG_ERR("No available ACL buffers!");
-	}
-
-	*remaining = sys_le16_to_cpu(hdr.len);
-
-	LOG_DBG("len %u", *remaining);
-
-	return buf;
+		default:
+			read = 0;
+			__ASSERT_NO_MSG(0);
+			break;
+		}
+	} while (read);
 }
 
 static void tx_isr(void)
@@ -199,79 +268,22 @@ static void tx_isr(void)
 	}
 }
 
-static void bt_uart_isr(struct device *unused, void *user_data)
+static void bt_uart_isr(const struct device *unused, void *user_data)
 {
-	static struct net_buf *buf;
-	static int remaining;
-
 	ARG_UNUSED(unused);
 	ARG_UNUSED(user_data);
 
-	while (uart_irq_update(hci_uart_dev) &&
-	       uart_irq_is_pending(hci_uart_dev)) {
-		int read;
+	if (!(uart_irq_rx_ready(hci_uart_dev) ||
+	      uart_irq_tx_ready(hci_uart_dev))) {
+		LOG_DBG("spurious interrupt");
+	}
 
-		if (uart_irq_tx_ready(hci_uart_dev)) {
-			tx_isr();
-		} else if (!uart_irq_rx_ready(hci_uart_dev)) {
-			/* Only the UART TX and RX path are interrupt-enabled */
-			LOG_DBG("spurious interrupt");
-			break;
-		}
+	if (uart_irq_tx_ready(hci_uart_dev)) {
+		tx_isr();
+	}
 
-		/* Beginning of a new packet */
-		if (!remaining) {
-			uint8_t type;
-
-			/* Get packet type */
-			read = h4_read(hci_uart_dev, &type, sizeof(type), 0);
-			if (read != sizeof(type)) {
-				LOG_WRN("Unable to read H4 packet type");
-				continue;
-			}
-
-			switch (type) {
-			case H4_CMD:
-				buf = h4_cmd_recv(&remaining);
-				break;
-			case H4_ACL:
-				buf = h4_acl_recv(&remaining);
-				break;
-			default:
-				LOG_ERR("Unknown H4 type %u", type);
-				return;
-			}
-
-			LOG_DBG("need to get %u bytes", remaining);
-
-			if (buf && remaining > net_buf_tailroom(buf)) {
-				LOG_ERR("Not enough space in buffer");
-				net_buf_unref(buf);
-				buf = NULL;
-			}
-		}
-
-		if (!buf) {
-			read = h4_discard(hci_uart_dev, remaining);
-			LOG_WRN("Discarded %d bytes", read);
-			remaining -= read;
-			continue;
-		}
-
-		read = h4_read(hci_uart_dev, net_buf_tail(buf), remaining, 0);
-
-		buf->len += read;
-		remaining -= read;
-
-		LOG_DBG("received %d bytes", read);
-
-		if (!remaining) {
-			LOG_DBG("full packet received");
-
-			/* Put buffer into TX queue, thread will dequeue */
-			net_buf_put(&tx_queue, buf);
-			buf = NULL;
-		}
+	if (uart_irq_rx_ready(hci_uart_dev)) {
+		rx_isr();
 	}
 }
 
@@ -356,7 +368,8 @@ void bt_ctlr_assert_handle(char *file, uint32_t line)
 	}
 }
 #endif /* CONFIG_BT_CTLR_ASSERT_HANDLER */
-static int hci_uart_init(struct device *unused)
+
+static int hci_uart_init(const struct device *unused)
 {
 	LOG_DBG("init hci uart");
 
@@ -434,8 +447,8 @@ void main(void)
 	int ret;
 	struct serial_dev *usb_0_sd = &devs[0];
 	struct serial_dev *uart_0_sd = &devs[1];
-	struct device *usb_0_dev;
-	struct device *uart_0_dev;
+	const struct device *usb_0_dev;
+	const struct device *uart_0_dev;
 
 	__ASSERT(hci_uart_dev, "UART device is NULL");
 
