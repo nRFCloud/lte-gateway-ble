@@ -69,10 +69,35 @@ static int oom_free(struct serial_dev *sd)
 	return -1; /* Was not able to free any heap memory */
 }
 
+void uart_timer_handler(struct k_timer *timer_id)
+{
+	void *user_data = k_timer_user_data_get(timer_id);
+	struct serial_dev *sd = user_data;
+	struct serial_dev *peer_sd = (struct serial_dev *)sd->peer;
+	struct uart_data *rx;
+
+	rx = sd->rx;
+	sd->rx = NULL;
+	if (rx) {
+		k_fifo_put(peer_sd->fifo, rx);
+		k_sem_give(&peer_sd->sem);
+	} else  {
+		LOG_DBG("timer ignored");
+	}
+
+}
+
+void uart_bridge_init(struct serial_dev *sd0, struct serial_dev *sd1)
+{
+	k_timer_init(&sd0->timer, uart_timer_handler, NULL);
+	k_timer_init(&sd1->timer, uart_timer_handler, NULL);
+}
+
 void uart_interrupt_handler(const struct device *dev, void *user_data)
 {
 	struct serial_dev *sd = user_data;
 	struct serial_dev *peer_sd = (struct serial_dev *)sd->peer;
+	struct uart_data *rx;
 #if defined(LOG_CONTENTS)
 	static char rxlabel[32];
 	static char txlabel[32];
@@ -114,10 +139,15 @@ void uart_interrupt_handler(const struct device *dev, void *user_data)
 #else
 				LOG_DBG("rx%d-%d RCVD", sd->num, sd->rx->len);
 #endif
-				k_fifo_put(peer_sd->fifo, sd->rx);
-				k_sem_give(&peer_sd->sem);
-
+				k_timer_stop(&sd->timer);
+				rx = sd->rx;
 				sd->rx = NULL;
+				k_fifo_put(peer_sd->fifo, rx);
+				k_sem_give(&peer_sd->sem);
+			} else if (!k_timer_remaining_ticks(&sd->timer)) {
+				k_timer_user_data_set(&sd->timer, user_data);
+				k_timer_start(&sd->timer, K_MSEC(50),
+					      K_NO_WAIT);
 			}
 		}
 	}

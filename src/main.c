@@ -116,7 +116,7 @@ static int h4_read(const struct device *uart, uint8_t *buf, size_t len)
 
 static bool valid_type(uint8_t type)
 {
-	return (type == H4_CMD) | (type == H4_ACL);
+	return (type == H4_CMD) || (type == H4_ACL);
 }
 
 /* Function assumes that type is validated and only CMD or ACL will be used. */
@@ -515,6 +515,8 @@ void main(void)
 
 	k_sem_init(&usb_0_sd->sem, 0, 1);
 	k_sem_init(&uart_0_sd->sem, 0, 1);
+
+	uart_bridge_init(usb_0_sd, uart_0_sd);
 
 	uart_irq_callback_user_data_set(usb_0_dev, uart_interrupt_handler,
 		usb_0_sd);
