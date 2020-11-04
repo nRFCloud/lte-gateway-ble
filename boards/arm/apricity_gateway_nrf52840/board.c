@@ -30,7 +30,7 @@ __packed struct pin_config {
 };
 
 bool ignore_reset = true;
-static void chip_reset(struct device *gpio,
+static void chip_reset(const struct device *gpio,
 		       struct gpio_callback *cb, uint32_t pins)
 {
 	const uint32_t stamp = k_cycle_get_32();
@@ -43,7 +43,7 @@ static void chip_reset(struct device *gpio,
 	}
 }
 
-static void reset_pin_wait_low(struct device *port, uint32_t pin)
+static void reset_pin_wait_low(const struct device *port, uint32_t pin)
 {
 	int val;
 
@@ -53,7 +53,7 @@ static void reset_pin_wait_low(struct device *port, uint32_t pin)
 	} while (val > 0);
 }
 
-static int reset_pin_configure(struct device *port, uint32_t pin)
+static int reset_pin_configure(const struct device *port, uint32_t pin)
 {
 	int err;
 
@@ -88,7 +88,7 @@ static int reset_pin_configure(struct device *port, uint32_t pin)
 	return 0;
 }
 
-static int init(struct device *dev)
+static int init(const struct device *dev)
 {
 	/* Make sure to configure the switches before initializing
 	 * the GPIO reset pin, so that we are connected to
@@ -96,7 +96,7 @@ static int init(struct device *dev)
 	 */
 	if (IS_ENABLED(CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET)) {
 		int rc;
-		struct device *port;
+		const struct device *port;
 		const char *name;
 
 		LOG_INF("Enabling GPIO reset line on pin P%d.%02u..",
