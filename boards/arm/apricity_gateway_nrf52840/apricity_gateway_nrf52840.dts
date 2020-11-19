@@ -18,6 +18,7 @@
 		zephyr,uart-mcumgr = &uart0;
 		zephyr,bt-mon-uart = &uart0;
 		zephyr,shell-uart = &uart0;
+		zephyr,bt-c2h-uart = &uart1;
 	};
 };
 
