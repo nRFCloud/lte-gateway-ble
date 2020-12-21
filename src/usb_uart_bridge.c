@@ -139,6 +139,10 @@ void uart_interrupt_handler(const struct device *dev, void *user_data)
 #else
 				LOG_DBG("rx%d-%d RCVD", sd->num, sd->rx->len);
 #endif
+				if (sd->alt_stream) {
+					sd->alt_stream->receive(sd->rx->buffer, sd->rx->len);
+				}
+
 				k_timer_stop(&sd->timer);
 				rx = sd->rx;
 				sd->rx = NULL;
