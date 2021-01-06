@@ -6,9 +6,13 @@
 
 cmake_minimum_required(VERSION 3.13.1)
 
+list(APPEND mcuboot_OVERLAY_CONFIG
+  "${CMAKE_CURRENT_SOURCE_DIR}/mcuboot_overlay-rsa.conf"
+  )
+
 set(mcuboot_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/mcuboot.conf)
 
-set(mcuboot_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/apricity_gateway_nrf52840.overlay)
+#set(mcuboot_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/apricity_gateway_nrf52840.overlay)
 
 set(BOARD_ROOT ${CMAKE_CURRENT_LIST_DIR})
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

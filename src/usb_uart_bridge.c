@@ -26,7 +26,7 @@ LOG_MODULE_REGISTER(usb_uart_bridge, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
 /* Overriding weak function to set iSerial runtime. */
 uint8_t *usb_update_sn_string_descriptor(void)
 {
-	static uint8_t buf[] = "PCA20035_12PLACEHLDRS";
+	static uint8_t buf[] = "NRFBLEGW_12PLACEHLDRS";
 
 	snprintk(&buf[9], 13, "%04X%08X",
 		(uint32_t)(NRF_FICR->DEVICEADDR[1] & 0x0000FFFF)|0x0000C000,
@@ -175,9 +175,11 @@ void uart_interrupt_handler(const struct device *dev, void *user_data)
 #endif
 
 		while (buf->len > written) {
-			written += uart_fifo_fill(dev,
-						  &buf->buffer[written],
-						  buf->len - written);
+			if (uart_irq_tx_ready(dev)) {
+				written += uart_fifo_fill(dev,
+							  &buf->buffer[written],
+							  buf->len - written);
+			}
 		}
 
 		int i = 0;
