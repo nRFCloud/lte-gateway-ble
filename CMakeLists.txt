@@ -16,4 +16,7 @@ project(lte-gateway-ble)
 
 target_sources(app PRIVATE src/main.c)
 target_sources(app PRIVATE src/usb_uart_bridge.c)
+target_sources(app PRIVATE src/alt_dfu_stream.c)
+target_sources(app PRIVATE src/tk_mqtt_dfu.c)
+target_sources(app PRIVATE src/tk_shutdown.c)
 zephyr_include_directories(src)

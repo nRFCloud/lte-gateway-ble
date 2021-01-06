@@ -32,6 +32,9 @@
 #include <usb/usb_device.h>
 #include <drivers/gpio.h>
 
+#include <dfu/mcuboot.h>
+
+#include "alt_dfu_stream.h"
 #include "usb_uart_bridge.h"
 
 LOG_MODULE_REGISTER(lte_gateway_ble, CONFIG_LTE_GATEWAY_BLE_LOG_LEVEL);
@@ -104,6 +107,12 @@ static K_FIFO_DEFINE(uart_tx_queue);
 
 NET_BUF_POOL_FIXED_DEFINE(cmd_tx_pool, CONFIG_BT_HCI_CMD_COUNT, CMD_BUF_SIZE,
 			  NULL);
+
+static struct uart_alt_stream dfu_alt_stream =
+	{
+		.receive = alt_dfu_receive,
+	};
+
 
 static int h4_read(const struct device *uart, uint8_t *buf, size_t len)
 {
@@ -507,11 +516,13 @@ void main(void)
 	usb_0_sd->dev = usb_0_dev;
 	usb_0_sd->fifo = &usb_0_tx_fifo;
 	usb_0_sd->peer = uart_0_sd;
+	usb_0_sd->alt_stream = NULL;
 
 	uart_0_sd->num = 0;
 	uart_0_sd->dev = uart_0_dev;
 	uart_0_sd->fifo = &uart_0_tx_fifo;
 	uart_0_sd->peer = usb_0_sd;
+	uart_0_sd->alt_stream = &dfu_alt_stream;
 
 	k_sem_init(&usb_0_sd->sem, 0, 1);
 	k_sem_init(&uart_0_sd->sem, 0, 1);
@@ -541,11 +552,27 @@ void main(void)
 						&uart_0_sd->sem, 0),
 	};
 
+	/* All initializations were successful mark image as working so that we
+	 * will not revert upon reboot. */
+	boot_write_img_confirmed();
+
 	LOG_INF("Entering loop");
 
 	while (1) {
-		struct net_buf *buf;
+		/* Process receive data in the background */
+		alt_dfu_process();
 
+		if (alt_dfu_is_tx_pending()) {
+			size_t alt_buf_len = 0;
+			const char * alt_buf = alt_dfu_get_pending_tx(&alt_buf_len);
+
+			for(size_t written = 0; written < alt_buf_len; ++written) {
+				uart_poll_out(uart_0_dev, *alt_buf);
+				++alt_buf;
+			}
+		}
+
+		struct net_buf *buf;
 		buf = net_buf_get(&rx_queue, K_NO_WAIT);
 		if (buf) {
 			err = h4_send(buf);

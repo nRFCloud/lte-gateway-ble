@@ -24,6 +24,10 @@ struct uart_data {
 	uint16_t len;
 };
 
+struct uart_alt_stream {
+	void (*receive)(const uint8_t *data, size_t len);
+};
+
 static struct serial_dev {
 	struct k_timer timer;
 	const struct device *dev;
@@ -32,6 +36,7 @@ static struct serial_dev {
 	struct k_sem sem;
 	struct uart_data *rx;
 	int num;
+	struct uart_alt_stream *alt_stream;
 } devs[2];
 
 void uart_bridge_init(struct serial_dev *sd0, struct serial_dev *sd1);
