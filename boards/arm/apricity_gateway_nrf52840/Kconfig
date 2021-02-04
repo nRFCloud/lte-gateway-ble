@@ -35,6 +35,20 @@ config BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN
 	help
 	 GPIO pin on nRF52840 for reset signal from nRF9160.
 
+config BOARD_APRICITY_GATEWAY_NRF52840_BOOT_SELECT_PORT
+	int "GPIO port for boot select"
+	default 0
+	help
+	  GPIO port on nRF52840 for MCUboot select signal from nRF9160.
+	  Set up in open-drain mode, and used as a signal back to
+	  nRF9160 to indicate nRF52840 is running application.
+
+config BOARD_APRICITY_GATEWAY_NRF52840_BOOT_SELECT_PIN
+	int "GPIO pin for boot select"
+	default 12
+	help
+	  GPIO pin for MCUboot select signal and application run signal.
+
 endif # BOARD_PCA10090_NRF52840_RESET
 
 endif # BOARD_APRICITY_GATEWAY_NRF52840

@@ -29,7 +29,13 @@ __packed struct pin_config {
 	uint8_t val;
 };
 
+#define RESET_PORT CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PORT
+#define RESET_PIN CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN
+#define BOOT_SELECT_PORT CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_BOOT_SELECT_PORT
+#define BOOT_SELECT_PIN CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_BOOT_SELECT_PIN
+
 bool ignore_reset = true;
+
 static void chip_reset(const struct device *gpio,
 		       struct gpio_callback *cb, uint32_t pins)
 {
@@ -100,10 +106,9 @@ static int init(const struct device *dev)
 		const char *name;
 
 		LOG_INF("Enabling GPIO reset line on pin P%d.%02u..",
-			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PORT,
-			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN);
+			RESET_PORT, RESET_PIN);
 
-		if (CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PORT == 0) {
+		if (RESET_PORT == 0) {
 			name = DT_LABEL(DT_NODELABEL(gpio0));
 		} else {
 			name = DT_LABEL(DT_NODELABEL(gpio1));
@@ -114,12 +119,46 @@ static int init(const struct device *dev)
 			return -EIO;
 		}
 
-		rc = reset_pin_configure(port,
-			CONFIG_BOARD_APRICITY_GATEWAY_NRF52840_RESET_PIN);
+		rc = reset_pin_configure(port, RESET_PIN);
 		if (rc) {
 			LOG_ERR("Unable to configure reset pin, err %d", rc);
 			return -EIO;
 		}
+
+		if (BOOT_SELECT_PORT == 0) {
+			name = DT_LABEL(DT_NODELABEL(gpio0));
+		} else {
+			name = DT_LABEL(DT_NODELABEL(gpio1));
+		}
+		port = device_get_binding(name);
+		if (!port) {
+			LOG_ERR("GPIO device %s not found!", name);
+			return -EIO;
+		}
+
+		/* let nrf9160 know we are running, by setting shared
+		 * boot pin low briefly
+		 */
+		rc = gpio_pin_configure(port, BOOT_SELECT_PIN, GPIO_OUTPUT |
+					GPIO_OPEN_DRAIN | GPIO_PULL_UP);
+		if (!rc) {
+			LOG_ERR("Unable to configure boot pin, err %d", rc);
+			return -EIO;
+		}
+
+		rc = gpio_pin_set(port, BOOT_SELECT_PIN, 0);
+		if (!rc) {
+			LOG_ERR("Unable to set boot pin = 0, err %d", rc);
+			return -EIO;
+		}
+
+		k_sleep(K_MSEC(200));
+
+		/* let it get pulled up again, so user can request mcuboot
+		 * later on if needed
+		 */
+		rc = gpio_pin_configure(port, BOOT_SELECT_PIN,
+					GPIO_INPUT | GPIO_PULL_UP);
 	}
 
 	LOG_INF("Board configured.");
